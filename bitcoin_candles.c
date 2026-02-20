@@ -265,78 +265,78 @@ static void input_callback(InputEvent* event, void* ctx) {
 int32_t bitcoin_candles_app(void* p) {
     UNUSED(p);
 
-    AppState state = {
-        .mode = STATE_CHART,
-        .running = true,
-        .offset = 90,
-        .visible = 10,
-        .cursor_x = 64,
-        .cursor_y = 36,
-        .has_start = false,
-        .line_count = 0,
-    };
+    AppState* state = malloc(sizeof(AppState));
+    memset(state, 0, sizeof(AppState));
+    state->mode     = STATE_CHART;
+    state->running  = true;
+    state->offset   = 90;
+    state->visible  = 10;
+    state->cursor_x = 64;
+    state->cursor_y = 36;
+    state->has_start = false;
+    state->line_count = 0;
 
     FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
 
     ViewPort* viewport = view_port_alloc();
-    view_port_draw_callback_set(viewport, draw_callback, &state);
+    view_port_draw_callback_set(viewport, draw_callback, state);
     view_port_input_callback_set(viewport, input_callback, event_queue);
 
     Gui* gui = furi_record_open(RECORD_GUI);
     gui_add_view_port(gui, viewport, GuiLayerFullscreen);
 
     InputEvent event;
-    while(state.running) {
+    while(state->running) {
         if(furi_message_queue_get(event_queue, &event, 100) == FuriStatusOk) {
             if(event.type == InputTypePress || event.type == InputTypeRepeat) {
-                if(state.mode == STATE_CHART) {
+                if(state->mode == STATE_CHART) {
                     if(event.key == InputKeyLeft) {
-                        if(state.offset > 0) state.offset--;
+                        if(state->offset > 0) state->offset--;
                     } else if(event.key == InputKeyRight) {
-                        if(state.offset + state.visible < CANDLE_COUNT) state.offset++;
+                        if(state->offset + state->visible < CANDLE_COUNT) state->offset++;
                     } else if(event.key == InputKeyUp) {
-                        if(state.visible > MIN_VISIBLE) state.visible--;
+                        if(state->visible > MIN_VISIBLE) state->visible--;
                     } else if(event.key == InputKeyDown) {
-                        if(state.visible < MAX_VISIBLE && state.offset + state.visible < CANDLE_COUNT)
-                            state.visible++;
+                        if(state->visible < MAX_VISIBLE && state->offset + state->visible < CANDLE_COUNT)
+                            state->visible++;
                     } else if(event.key == InputKeyOk) {
-                        state.mode = STATE_DRAW;
-                        state.cursor_x = 64;
-                        state.cursor_y = 36;
-                        state.has_start = false;
+                        state->mode     = STATE_DRAW;
+                        state->cursor_x = 64;
+                        state->cursor_y = 36;
+                        state->has_start = false;
                     } else if(event.key == InputKeyBack) {
-                        state.running = false;
+                        state->running = false;
                     }
 
                 } else { // STATE_DRAW
                     if(event.key == InputKeyLeft) {
-                        if(state.cursor_x > CHART_X + 1) state.cursor_x--;
+                        if(state->cursor_x > CHART_X + 1) state->cursor_x--;
                     } else if(event.key == InputKeyRight) {
-                        if(state.cursor_x < CHART_X + CHART_W - 1) state.cursor_x++;
+                        if(state->cursor_x < CHART_X + CHART_W - 1) state->cursor_x++;
                     } else if(event.key == InputKeyUp) {
-                        if(state.cursor_y > CHART_Y + 1) state.cursor_y--;
+                        if(state->cursor_y > CHART_Y + 1) state->cursor_y--;
                     } else if(event.key == InputKeyDown) {
-                        if(state.cursor_y < CHART_Y + CHART_H - 1) state.cursor_y++;
+                        if(state->cursor_y < CHART_Y + CHART_H - 1) state->cursor_y++;
                     } else if(event.key == InputKeyOk) {
-                        if(!state.has_start) {
-                            state.start_x = state.cursor_x;
-                            state.start_y = state.cursor_y;
-                            state.has_start = true;
+                        if(!state->has_start) {
+                            state->start_x   = state->cursor_x;
+                            state->start_y   = state->cursor_y;
+                            state->has_start = true;
                         } else {
-                            if(state.line_count < MAX_LINES) {
-                                state.lines[state.line_count].x1 = state.start_x;
-                                state.lines[state.line_count].y1 = state.start_y;
-                                state.lines[state.line_count].x2 = state.cursor_x;
-                                state.lines[state.line_count].y2 = state.cursor_y;
-                                state.line_count++;
+                            if(state->line_count < MAX_LINES) {
+                                state->lines[state->line_count].x1 = state->start_x;
+                                state->lines[state->line_count].y1 = state->start_y;
+                                state->lines[state->line_count].x2 = state->cursor_x;
+                                state->lines[state->line_count].y2 = state->cursor_y;
+                                state->line_count++;
                             }
-                            state.has_start = false;
+                            state->has_start = false;
                         }
                     } else if(event.key == InputKeyBack) {
-                        if(state.has_start) {
-                            state.has_start = false;
+                        if(state->has_start) {
+                            state->has_start = false;
                         } else {
-                            state.mode = STATE_CHART;
+                            state->mode = STATE_CHART;
                         }
                     }
                 }
@@ -350,6 +350,7 @@ int32_t bitcoin_candles_app(void* p) {
     view_port_free(viewport);
     furi_message_queue_free(event_queue);
     furi_record_close(RECORD_GUI);
+    free(state);
 
     return 0;
 }
