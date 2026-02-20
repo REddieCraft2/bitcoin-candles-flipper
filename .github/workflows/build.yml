@@ -1,0 +1,37 @@
+name: Build FAP
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v3
+
+      - name: Checkout Flipper Firmware
+        uses: actions/checkout@v3
+        with:
+          repository: flipperdevices/flipperzero-firmware
+          submodules: recursive
+          path: firmware
+
+      - name: Copy app into firmware
+        run: |
+          mkdir -p firmware/applications_user/bitcoin_candles
+          cp application.fam firmware/applications_user/bitcoin_candles/
+          cp bitcoin_candles.c firmware/applications_user/bitcoin_candles/
+
+      - name: Build FAP
+        run: |
+          cd firmware
+          ./fbt fap_bitcoin_candles
+
+      - name: Upload FAP as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: bitcoin_candles_fap
+          path: firmware/build/f7-firmware-D/.extapps/bitcoin_candles.fap
