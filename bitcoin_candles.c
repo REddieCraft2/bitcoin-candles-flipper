@@ -136,18 +136,18 @@ typedef enum {
 typedef struct {
     AppStateMode mode;
     bool running;
-    
+
     // Chart-Modus
-    int  offset;
-    int  visible;
-    
+    int offset;
+    int visible;
+
     // Draw-Modus
     int cursor_x;
     int cursor_y;
     int start_x;
     int start_y;
     bool has_start;
-    
+
     DrawnLine lines[MAX_LINES];
     int line_count;
 } AppState;
@@ -229,7 +229,6 @@ static void draw_drawing_mode(Canvas* canvas, AppState* state) {
 
     canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
 
-    // Alle bisherigen Linien zeichnen
     for(int i = 0; i < state->line_count; i++) {
         canvas_draw_line(
             canvas,
@@ -240,12 +239,10 @@ static void draw_drawing_mode(Canvas* canvas, AppState* state) {
         );
     }
 
-    // Wenn wir einen Startpunkt haben, Linie vom Start zum Cursor zeichnen
     if(state->has_start) {
         canvas_draw_line(canvas, state->start_x, state->start_y, state->cursor_x, state->cursor_y);
     }
 
-    // Cursor zeichnen (grosses Kreuz)
     canvas_draw_line(canvas, state->cursor_x - 3, state->cursor_y, state->cursor_x + 3, state->cursor_y);
     canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 3, state->cursor_x, state->cursor_y + 3);
 }
@@ -292,4 +289,67 @@ int32_t bitcoin_candles_app(void* p) {
     while(state.running) {
         if(furi_message_queue_get(event_queue, &event, 100) == FuriStatusOk) {
             if(event.type == InputTypePress || event.type == InputTypeRepeat) {
-                if(state.mode == STATE_CHART) {​​​​​​​​​​​​​​​​
+                if(state.mode == STATE_CHART) {
+                    if(event.key == InputKeyLeft) {
+                        if(state.offset > 0) state.offset--;
+                    } else if(event.key == InputKeyRight) {
+                        if(state.offset + state.visible < CANDLE_COUNT) state.offset++;
+                    } else if(event.key == InputKeyUp) {
+                        if(state.visible > MIN_VISIBLE) state.visible--;
+                    } else if(event.key == InputKeyDown) {
+                        if(state.visible < MAX_VISIBLE && state.offset + state.visible < CANDLE_COUNT)
+                            state.visible++;
+                    } else if(event.key == InputKeyOk) {
+                        state.mode = STATE_DRAW;
+                        state.cursor_x = 64;
+                        state.cursor_y = 36;
+                        state.has_start = false;
+                    } else if(event.key == InputKeyBack) {
+                        state.running = false;
+                    }
+
+                } else { // STATE_DRAW
+                    if(event.key == InputKeyLeft) {
+                        if(state.cursor_x > CHART_X + 1) state.cursor_x--;
+                    } else if(event.key == InputKeyRight) {
+                        if(state.cursor_x < CHART_X + CHART_W - 1) state.cursor_x++;
+                    } else if(event.key == InputKeyUp) {
+                        if(state.cursor_y > CHART_Y + 1) state.cursor_y--;
+                    } else if(event.key == InputKeyDown) {
+                        if(state.cursor_y < CHART_Y + CHART_H - 1) state.cursor_y++;
+                    } else if(event.key == InputKeyOk) {
+                        if(!state.has_start) {
+                            state.start_x = state.cursor_x;
+                            state.start_y = state.cursor_y;
+                            state.has_start = true;
+                        } else {
+                            if(state.line_count < MAX_LINES) {
+                                state.lines[state.line_count].x1 = state.start_x;
+                                state.lines[state.line_count].y1 = state.start_y;
+                                state.lines[state.line_count].x2 = state.cursor_x;
+                                state.lines[state.line_count].y2 = state.cursor_y;
+                                state.line_count++;
+                            }
+                            state.has_start = false;
+                        }
+                    } else if(event.key == InputKeyBack) {
+                        if(state.has_start) {
+                            state.has_start = false;
+                        } else {
+                            state.mode = STATE_CHART;
+                        }
+                    }
+                }
+            }
+        }
+        view_port_update(viewport);
+    }
+
+    // Cleanup
+    gui_remove_view_port(gui, viewport);
+    view_port_free(viewport);
+    furi_message_queue_free(event_queue);
+    furi_record_close(RECORD_GUI);
+
+    return 0;
+}
