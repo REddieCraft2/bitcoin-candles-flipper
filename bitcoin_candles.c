@@ -123,18 +123,27 @@ static Candle candles[CANDLE_COUNT] = {
     { 105500, 109000, 105000, 108500 },
 };
 
-#define MAX_LINES 50
+#define MAX_OBJS 50
 
-// Linie wird in "Welt-Koordinaten" gespeichert:
-// candle_index (float) + preis (int)
+typedef enum {
+    TOOL_LINE,
+    TOOL_HLINE,
+    TOOL_BOX,
+} DrawTool;
+
+typedef enum {
+    OBJ_LINE,
+    OBJ_HLINE,
+    OBJ_BOX,
+} ObjType;
+
 typedef struct {
-    int price1;   // Preis am Startpunkt
-    int price2;   // Preis am Endpunkt
-    // X-Position als Candle-Index (relativ zu candles[0])
-    // gespeichert als *1000 für Festkomma-Genauigkeit
-    int cidx1;    // Candle-Index * 1000
+    ObjType type;
+    int price1;
+    int price2;
+    int cidx1;
     int cidx2;
-} DrawnLine;
+} DrawnObj;
 
 typedef enum {
     STATE_CHART,
@@ -145,21 +154,18 @@ typedef struct {
     AppStateMode mode;
     bool running;
 
-    // Chart-Modus
     int offset;
     int visible;
 
-    // Draw-Modus (Cursor in Pixel)
+    DrawTool tool;
     int cursor_x;
     int cursor_y;
-
-    // Startpunkt in Welt-Koordinaten
     int start_price;
     int start_cidx;
     bool has_start;
 
-    DrawnLine lines[MAX_LINES];
-    int line_count;
+    DrawnObj objs[MAX_OBJS];
+    int obj_count;
 } AppState;
 
 static void get_price_range_window(int offset, int visible, int* out_min, int* out_max) {
@@ -177,32 +183,26 @@ static void get_price_range_window(int offset, int visible, int* out_min, int* o
 
 static int price_to_y(int price, int price_min, int price_max) {
     if(price_max <= price_min) return CHART_Y + CHART_H / 2;
-    int ratio_num = (price - price_min) * CHART_H;
-    int ratio_den = (price_max - price_min);
-    return CHART_Y + CHART_H - (ratio_num / ratio_den);
+    return CHART_Y + CHART_H - ((price - price_min) * CHART_H / (price_max - price_min));
 }
 
-// Pixel-X aus Candle-Index * 1000
+static int y_to_price(int py, int price_min, int price_max) {
+    int rel = CHART_Y + CHART_H - py;
+    return price_min + (rel * (price_max - price_min)) / CHART_H;
+}
+
 static int cidx_to_x(int cidx1000, int offset, int visible) {
     int candle_w = (CHART_W - 4) / visible;
     if(candle_w < 1) candle_w = 1;
-    // relative Position im sichtbaren Fenster
     int rel = cidx1000 - offset * 1000;
     return CHART_X + 2 + (rel * candle_w) / 1000 + candle_w / 2;
 }
 
-// Pixel-X → Candle-Index * 1000
 static int x_to_cidx(int px, int offset, int visible) {
     int candle_w = (CHART_W - 4) / visible;
     if(candle_w < 1) candle_w = 1;
     int rel_px = px - (CHART_X + 2 + candle_w / 2);
     return offset * 1000 + (rel_px * 1000) / candle_w;
-}
-
-// Pixel-Y → Preis
-static int y_to_price(int py, int price_min, int price_max) {
-    int rel = CHART_Y + CHART_H - py;
-    return price_min + (rel * (price_max - price_min)) / CHART_H;
 }
 
 static void draw_candles(Canvas* canvas, AppState* state, int price_min, int price_max) {
@@ -214,25 +214,19 @@ static void draw_candles(Canvas* canvas, AppState* state, int price_min, int pri
     for(int i = 0; i < state->visible; i++) {
         int idx = state->offset + i;
         if(idx >= CANDLE_COUNT) break;
-
         Candle* c = &candles[idx];
         bool bullish = (c->close >= c->open);
-
         int cx = CHART_X + 2 + i * candle_w + candle_w / 2;
-
         int y_high  = price_to_y(c->high,  price_min, price_max);
         int y_low   = price_to_y(c->low,   price_min, price_max);
         int y_open  = price_to_y(c->open,  price_min, price_max);
         int y_close = price_to_y(c->close, price_min, price_max);
-
         int body_top    = bullish ? y_close : y_open;
         int body_bottom = bullish ? y_open  : y_close;
         int body_h      = body_bottom - body_top;
         if(body_h < 1) body_h = 1;
-
         canvas_draw_line(canvas, cx, y_high, cx, body_top);
         canvas_draw_line(canvas, cx, body_bottom, cx, y_low);
-
         int bx = cx - body_w / 2;
         if(bullish) {
             canvas_draw_frame(canvas, bx, body_top, body_w, body_h);
@@ -242,73 +236,101 @@ static void draw_candles(Canvas* canvas, AppState* state, int price_min, int pri
     }
 }
 
-static void draw_lines(Canvas* canvas, AppState* state, int price_min, int price_max) {
-    for(int i = 0; i < state->line_count; i++) {
-        int x1 = cidx_to_x(state->lines[i].cidx1, state->offset, state->visible);
-        int x2 = cidx_to_x(state->lines[i].cidx2, state->offset, state->visible);
-        int y1 = price_to_y(state->lines[i].price1, price_min, price_max);
-        int y2 = price_to_y(state->lines[i].price2, price_min, price_max);
-        canvas_draw_line(canvas, x1, y1, x2, y2);
+static void draw_objects(Canvas* canvas, AppState* state, int price_min, int price_max) {
+    for(int i = 0; i < state->obj_count; i++) {
+        DrawnObj* o = &state->objs[i];
+        if(o->type == OBJ_LINE) {
+            int x1 = cidx_to_x(o->cidx1, state->offset, state->visible);
+            int x2 = cidx_to_x(o->cidx2, state->offset, state->visible);
+            int y1 = price_to_y(o->price1, price_min, price_max);
+            int y2 = price_to_y(o->price2, price_min, price_max);
+            canvas_draw_line(canvas, x1, y1, x2, y2);
+        } else if(o->type == OBJ_HLINE) {
+            int y = price_to_y(o->price1, price_min, price_max);
+            canvas_draw_line(canvas, CHART_X, y, CHART_X + CHART_W, y);
+        } else if(o->type == OBJ_BOX) {
+            int x_left   = cidx_to_x(o->cidx1, state->offset, state->visible);
+            int y_top    = price_to_y(o->price1, price_min, price_max);
+            int y_bottom = price_to_y(o->price2, price_min, price_max);
+            if(y_top > y_bottom) { int tmp = y_top; y_top = y_bottom; y_bottom = tmp; }
+            int box_h = y_bottom - y_top;
+            if(box_h < 1) box_h = 1;
+            if(x_left < CHART_X + CHART_W) {
+                if(x_left < CHART_X) x_left = CHART_X;
+                int box_w = (CHART_X + CHART_W) - x_left;
+                canvas_draw_frame(canvas, x_left, y_top, box_w, box_h);
+            }
+        }
     }
 }
 
-static void draw_chart(Canvas* canvas, AppState* state) {
+static const char* tool_name(DrawTool t) {
+    if(t == TOOL_LINE)  return "Linie";
+    if(t == TOOL_HLINE) return "Horizontal";
+    return "Box";
+}
+
+static void render(Canvas* canvas, AppState* state) {
     int price_min, price_max;
     get_price_range_window(state->offset, state->visible, &price_min, &price_max);
 
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 2, 7, "BTC/USD");
 
-    if(state->line_count > 0) {
-        canvas_draw_str(canvas, 80, 7, "Back=Undo");
-    }
-
-    canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
-    draw_candles(canvas, state, price_min, price_max);
-    draw_lines(canvas, state, price_min, price_max);
-}
-
-static void draw_drawing_mode(Canvas* canvas, AppState* state) {
-    int price_min, price_max;
-    get_price_range_window(state->offset, state->visible, &price_min, &price_max);
-
-    canvas_clear(canvas);
-    canvas_set_color(canvas, ColorBlack);
-    canvas_set_font(canvas, FontSecondary);
-
-    if(state->has_start) {
-        canvas_draw_str(canvas, 2, 7, "DRAW: Endpunkt");
+    if(state->mode == STATE_CHART) {
+        canvas_draw_str(canvas, 2, 7, "BTC/USD");
+        if(state->obj_count > 0) canvas_draw_str(canvas, 80, 7, "Back=Undo");
     } else {
-        canvas_draw_str(canvas, 2, 7, "DRAW: Startpunkt");
+        char label[32];
+        const char* step = state->has_start ? "Ende" : "Start";
+        if(state->tool == TOOL_HLINE)
+            snprintf(label, sizeof(label), "%s: OK=setzen", tool_name(state->tool));
+        else
+            snprintf(label, sizeof(label), "%s: %s", tool_name(state->tool), step);
+        canvas_draw_str(canvas, 2, 7, label);
     }
 
     canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
     draw_candles(canvas, state, price_min, price_max);
-    draw_lines(canvas, state, price_min, price_max);
+    draw_objects(canvas, state, price_min, price_max);
 
-    // Vorschau-Linie
-    if(state->has_start) {
-        int x1 = cidx_to_x(state->start_cidx, state->offset, state->visible);
-        int y1 = price_to_y(state->start_price, price_min, price_max);
-        canvas_draw_line(canvas, x1, y1, state->cursor_x, state->cursor_y);
+    if(state->mode == STATE_DRAW) {
+        // Vorschau
+        if(state->has_start) {
+            if(state->tool == TOOL_LINE) {
+                int x1 = cidx_to_x(state->start_cidx, state->offset, state->visible);
+                int y1 = price_to_y(state->start_price, price_min, price_max);
+                canvas_draw_line(canvas, x1, y1, state->cursor_x, state->cursor_y);
+            } else if(state->tool == TOOL_BOX) {
+                int x_left   = cidx_to_x(state->start_cidx, state->offset, state->visible);
+                int y_top    = price_to_y(state->start_price, price_min, price_max);
+                int y_bottom = state->cursor_y;
+                if(y_top > y_bottom) { int tmp = y_top; y_top = y_bottom; y_bottom = tmp; }
+                int box_h = y_bottom - y_top;
+                if(box_h < 1) box_h = 1;
+                if(x_left < CHART_X + CHART_W) {
+                    if(x_left < CHART_X) x_left = CHART_X;
+                    int box_w = (CHART_X + CHART_W) - x_left;
+                    canvas_draw_frame(canvas, x_left, y_top, box_w, box_h);
+                }
+            }
+        }
+        // Horizontale Vorschau immer anzeigen
+        if(state->tool == TOOL_HLINE) {
+            canvas_draw_line(canvas, CHART_X, state->cursor_y,
+                                     CHART_X + CHART_W, state->cursor_y);
+        }
+        // Cursor-Kreuz
+        canvas_draw_line(canvas, state->cursor_x - 4, state->cursor_y,
+                                 state->cursor_x + 4, state->cursor_y);
+        canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 4,
+                                 state->cursor_x, state->cursor_y + 4);
     }
-
-    // Cursor-Kreuz
-    canvas_draw_line(canvas, state->cursor_x - 4, state->cursor_y,
-                             state->cursor_x + 4, state->cursor_y);
-    canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 4,
-                             state->cursor_x, state->cursor_y + 4);
 }
 
 static void draw_callback(Canvas* canvas, void* ctx) {
-    AppState* state = (AppState*)ctx;
-    if(state->mode == STATE_CHART) {
-        draw_chart(canvas, state);
-    } else {
-        draw_drawing_mode(canvas, state);
-    }
+    render(canvas, (AppState*)ctx);
 }
 
 static void input_callback(InputEvent* event, void* ctx) {
@@ -327,15 +349,14 @@ int32_t bitcoin_candles_app(void* p) {
     state->visible    = 10;
     state->cursor_x   = CHART_X + CHART_W / 2;
     state->cursor_y   = CHART_Y + CHART_H / 2;
+    state->tool       = TOOL_LINE;
     state->has_start  = false;
-    state->line_count = 0;
+    state->obj_count  = 0;
 
     FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
-
     ViewPort* viewport = view_port_alloc();
     view_port_draw_callback_set(viewport, draw_callback, state);
     view_port_input_callback_set(viewport, input_callback, event_queue);
-
     Gui* gui = furi_record_open(RECORD_GUI);
     gui_add_view_port(gui, viewport, GuiLayerFullscreen);
 
@@ -362,18 +383,21 @@ int32_t bitcoin_candles_app(void* p) {
                         state->cursor_y  = CHART_Y + CHART_H / 2;
                         state->has_start = false;
                     } else if(event.key == InputKeyBack) {
-                        // Kurz = Undo
-                        if(state->line_count > 0) state->line_count--;
+                        if(state->obj_count > 0) state->obj_count--;
                     }
                 }
-                // Lang = beenden
                 if(event.type == InputTypeLong && event.key == InputKeyBack) {
                     state->running = false;
                 }
 
             // ── DRAW-MODUS ───────────────────────────────────────────
             } else {
-                if(event.type == InputTypePress || event.type == InputTypeRepeat) {
+                // OK lang = Tool wechseln
+                if(event.type == InputTypeLong && event.key == InputKeyOk) {
+                    state->tool = (DrawTool)((state->tool + 1) % 3);
+                    state->has_start = false;
+
+                } else if(event.type == InputTypePress || event.type == InputTypeRepeat) {
                     if(event.key == InputKeyLeft) {
                         if(state->cursor_x > CHART_X + 1) state->cursor_x--;
                     } else if(event.key == InputKeyRight) {
@@ -382,31 +406,45 @@ int32_t bitcoin_candles_app(void* p) {
                         if(state->cursor_y > CHART_Y + 1) state->cursor_y--;
                     } else if(event.key == InputKeyDown) {
                         if(state->cursor_y < CHART_Y + CHART_H - 1) state->cursor_y++;
+
                     } else if(event.key == InputKeyOk) {
+                        // OK kurz = Punkt setzen
                         int price_min, price_max;
                         get_price_range_window(state->offset, state->visible,
                                                &price_min, &price_max);
-                        if(!state->has_start) {
-                            // Startpunkt in Welt-Koordinaten speichern
-                            state->start_price = y_to_price(state->cursor_y,
-                                                            price_min, price_max);
-                            state->start_cidx  = x_to_cidx(state->cursor_x,
-                                                            state->offset, state->visible);
-                            state->has_start = true;
+                        int cur_price = y_to_price(state->cursor_y, price_min, price_max);
+                        int cur_cidx  = x_to_cidx(state->cursor_x, state->offset, state->visible);
+
+                        if(state->tool == TOOL_HLINE) {
+                            if(state->obj_count < MAX_OBJS) {
+                                state->objs[state->obj_count].type   = OBJ_HLINE;
+                                state->objs[state->obj_count].price1 = cur_price;
+                                state->obj_count++;
+                            }
+                        } else if(!state->has_start) {
+                            state->start_price = cur_price;
+                            state->start_cidx  = cur_cidx;
+                            state->has_start   = true;
                         } else {
-                            // Endpunkt speichern → Linie fertig
-                            if(state->line_count < MAX_LINES) {
-                                int ep = y_to_price(state->cursor_y, price_min, price_max);
-                                int ec = x_to_cidx(state->cursor_x,
-                                                   state->offset, state->visible);
-                                state->lines[state->line_count].price1 = state->start_price;
-                                state->lines[state->line_count].cidx1  = state->start_cidx;
-                                state->lines[state->line_count].price2 = ep;
-                                state->lines[state->line_count].cidx2  = ec;
-                                state->line_count++;
+                            if(state->obj_count < MAX_OBJS) {
+                                DrawnObj* o = &state->objs[state->obj_count];
+                                if(state->tool == TOOL_LINE) {
+                                    o->type   = OBJ_LINE;
+                                    o->price1 = state->start_price;
+                                    o->cidx1  = state->start_cidx;
+                                    o->price2 = cur_price;
+                                    o->cidx2  = cur_cidx;
+                                } else { // TOOL_BOX
+                                    o->type   = OBJ_BOX;
+                                    o->price1 = state->start_price;
+                                    o->price2 = cur_price;
+                                    o->cidx1  = state->start_cidx;
+                                }
+                                state->obj_count++;
                             }
                             state->has_start = false;
                         }
+
                     } else if(event.key == InputKeyBack) {
                         if(state->has_start) {
                             state->has_start = false;
@@ -420,12 +458,10 @@ int32_t bitcoin_candles_app(void* p) {
         view_port_update(viewport);
     }
 
-    // Cleanup
     gui_remove_view_port(gui, viewport);
     view_port_free(viewport);
     furi_message_queue_free(event_queue);
     furi_record_close(RECORD_GUI);
     free(state);
-
     return 0;
 }
