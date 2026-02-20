@@ -182,6 +182,11 @@ static void draw_chart(Canvas* canvas, AppState* state) {
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str(canvas, 2, 7, "BTC/USD");
 
+    // Hinweis anzeigen
+    if(state->line_count > 0) {
+        canvas_draw_str(canvas, 60, 7, "[Back=Undo]");
+    }
+
     canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
 
     int candle_w = (CHART_W - 4) / state->visible;
@@ -218,17 +223,73 @@ static void draw_chart(Canvas* canvas, AppState* state) {
             canvas_draw_box(canvas, bx, body_top, body_w, body_h);
         }
     }
+
+    // Gezeichnete Linien auch im Chart-Modus anzeigen
+    for(int i = 0; i < state->line_count; i++) {
+        canvas_draw_line(
+            canvas,
+            state->lines[i].x1,
+            state->lines[i].y1,
+            state->lines[i].x2,
+            state->lines[i].y2
+        );
+    }
 }
 
 static void draw_drawing_mode(Canvas* canvas, AppState* state) {
+    int price_min, price_max;
+    get_price_range_window(state->offset, state->visible, &price_min, &price_max);
+
     canvas_clear(canvas);
     canvas_set_color(canvas, ColorBlack);
 
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str(canvas, 2, 7, "DRAWING MODE");
+    // Statuszeile: zeigt ob wir auf Startpunkt oder Endpunkt warten
+    if(state->has_start) {
+        canvas_draw_str(canvas, 2, 7, "DRAW: Endpunkt setzen");
+    } else {
+        canvas_draw_str(canvas, 2, 7, "DRAW: Startpunkt setzen");
+    }
 
     canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
 
+    // Chart-Kerzen im Hintergrund zeichnen
+    int candle_w = (CHART_W - 4) / state->visible;
+    if(candle_w < 1) candle_w = 1;
+    int body_w = candle_w - 2;
+    if(body_w < 1) body_w = 1;
+
+    for(int i = 0; i < state->visible; i++) {
+        int idx = state->offset + i;
+        if(idx >= CANDLE_COUNT) break;
+
+        Candle* c = &candles[idx];
+        bool bullish = (c->close >= c->open);
+
+        int cx = CHART_X + 2 + i * candle_w + candle_w / 2;
+
+        int y_high  = price_to_y(c->high,  price_min, price_max);
+        int y_low   = price_to_y(c->low,   price_min, price_max);
+        int y_open  = price_to_y(c->open,  price_min, price_max);
+        int y_close = price_to_y(c->close, price_min, price_max);
+
+        int body_top    = bullish ? y_close : y_open;
+        int body_bottom = bullish ? y_open  : y_close;
+        int body_h      = body_bottom - body_top;
+        if(body_h < 1) body_h = 1;
+
+        canvas_draw_line(canvas, cx, y_high, cx, body_top);
+        canvas_draw_line(canvas, cx, body_bottom, cx, y_low);
+
+        int bx = cx - body_w / 2;
+        if(bullish) {
+            canvas_draw_frame(canvas, bx, body_top, body_w, body_h);
+        } else {
+            canvas_draw_box(canvas, bx, body_top, body_w, body_h);
+        }
+    }
+
+    // Bereits gespeicherte Linien
     for(int i = 0; i < state->line_count; i++) {
         canvas_draw_line(
             canvas,
@@ -239,17 +300,18 @@ static void draw_drawing_mode(Canvas* canvas, AppState* state) {
         );
     }
 
+    // Vorschau-Linie vom Startpunkt zum Cursor
     if(state->has_start) {
         canvas_draw_line(canvas, state->start_x, state->start_y, state->cursor_x, state->cursor_y);
     }
 
-    canvas_draw_line(canvas, state->cursor_x - 3, state->cursor_y, state->cursor_x + 3, state->cursor_y);
-    canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 3, state->cursor_x, state->cursor_y + 3);
+    // Cursor-Kreuz
+    canvas_draw_line(canvas, state->cursor_x - 4, state->cursor_y, state->cursor_x + 4, state->cursor_y);
+    canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 4, state->cursor_x, state->cursor_y + 4);
 }
 
 static void draw_callback(Canvas* canvas, void* ctx) {
     AppState* state = (AppState*)ctx;
-
     if(state->mode == STATE_CHART) {
         draw_chart(canvas, state);
     } else {
@@ -267,12 +329,12 @@ int32_t bitcoin_candles_app(void* p) {
 
     AppState* state = malloc(sizeof(AppState));
     memset(state, 0, sizeof(AppState));
-    state->mode     = STATE_CHART;
-    state->running  = true;
-    state->offset   = 90;
-    state->visible  = 10;
-    state->cursor_x = 64;
-    state->cursor_y = 36;
+    state->mode      = STATE_CHART;
+    state->running   = true;
+    state->offset    = 90;
+    state->visible   = 10;
+    state->cursor_x  = CHART_X + CHART_W / 2;
+    state->cursor_y  = CHART_Y + CHART_H / 2;
     state->has_start = false;
     state->line_count = 0;
 
@@ -288,8 +350,11 @@ int32_t bitcoin_candles_app(void* p) {
     InputEvent event;
     while(state->running) {
         if(furi_message_queue_get(event_queue, &event, 100) == FuriStatusOk) {
-            if(event.type == InputTypePress || event.type == InputTypeRepeat) {
-                if(state->mode == STATE_CHART) {
+
+            // ── CHART-MODUS ──────────────────────────────────────────
+            if(state->mode == STATE_CHART) {
+
+                if(event.type == InputTypePress || event.type == InputTypeRepeat) {
                     if(event.key == InputKeyLeft) {
                         if(state->offset > 0) state->offset--;
                     } else if(event.key == InputKeyRight) {
@@ -297,18 +362,32 @@ int32_t bitcoin_candles_app(void* p) {
                     } else if(event.key == InputKeyUp) {
                         if(state->visible > MIN_VISIBLE) state->visible--;
                     } else if(event.key == InputKeyDown) {
-                        if(state->visible < MAX_VISIBLE && state->offset + state->visible < CANDLE_COUNT)
+                        if(state->visible < MAX_VISIBLE &&
+                           state->offset + state->visible < CANDLE_COUNT)
                             state->visible++;
                     } else if(event.key == InputKeyOk) {
-                        state->mode     = STATE_DRAW;
-                        state->cursor_x = 64;
-                        state->cursor_y = 36;
+                        // Wechsel in den Zeichen-Modus
+                        state->mode      = STATE_DRAW;
+                        state->cursor_x  = CHART_X + CHART_W / 2;
+                        state->cursor_y  = CHART_Y + CHART_H / 2;
                         state->has_start = false;
                     } else if(event.key == InputKeyBack) {
-                        state->running = false;
+                        // Kurz drücken = Undo (letzte Linie löschen)
+                        if(state->line_count > 0) {
+                            state->line_count--;
+                        }
                     }
+                }
 
-                } else { // STATE_DRAW
+                // Lang drücken = App beenden
+                if(event.type == InputTypeLong && event.key == InputKeyBack) {
+                    state->running = false;
+                }
+
+            // ── DRAW-MODUS ───────────────────────────────────────────
+            } else {
+
+                if(event.type == InputTypePress || event.type == InputTypeRepeat) {
                     if(event.key == InputKeyLeft) {
                         if(state->cursor_x > CHART_X + 1) state->cursor_x--;
                     } else if(event.key == InputKeyRight) {
@@ -319,10 +398,12 @@ int32_t bitcoin_candles_app(void* p) {
                         if(state->cursor_y < CHART_Y + CHART_H - 1) state->cursor_y++;
                     } else if(event.key == InputKeyOk) {
                         if(!state->has_start) {
+                            // Startpunkt setzen
                             state->start_x   = state->cursor_x;
                             state->start_y   = state->cursor_y;
                             state->has_start = true;
                         } else {
+                            // Linie speichern
                             if(state->line_count < MAX_LINES) {
                                 state->lines[state->line_count].x1 = state->start_x;
                                 state->lines[state->line_count].y1 = state->start_y;
@@ -334,8 +415,10 @@ int32_t bitcoin_candles_app(void* p) {
                         }
                     } else if(event.key == InputKeyBack) {
                         if(state->has_start) {
+                            // Startpunkt abbrechen
                             state->has_start = false;
                         } else {
+                            // Zurück zum Chart-Modus
                             state->mode = STATE_CHART;
                         }
                     }
