@@ -29,6 +29,18 @@ static int candle_count = 0;
 // Liest die CSV von der SD-Karte ein
 // Format pro Zeile: open,high,low,close
 // z.B.: 94500,95200,94100,94800
+// Einfacher int-Parser ohne sscanf
+static int parse_int(const char* s, int* out) {
+    int val = 0;
+    int i = 0;
+    while(s[i] >= '0' && s[i] <= '9') {
+        val = val * 10 + (s[i] - '0');
+        i++;
+    }
+    *out = val;
+    return i;
+}
+
 static bool load_candles_from_csv() {
     Storage* storage = furi_record_open(RECORD_STORAGE);
     File* file = storage_file_alloc(storage);
@@ -40,34 +52,42 @@ static bool load_candles_from_csv() {
     }
 
     candle_count = 0;
-    char line[64];
+    char line[32];
     int pos = 0;
     char c = 0;
 
     while(candle_count < CANDLE_COUNT) {
-        // Zeile einlesen
         pos = 0;
-        memset(line, 0, sizeof(line));
 
+        // Zeile einlesen
         while(storage_file_read(file, &c, 1) == 1) {
             if(c == '\n' || c == '\r') {
-                if(pos > 0) break;  // Zeile fertig
+                if(pos > 0) break;
             } else {
-                if(pos < (int)sizeof(line) - 1) {
+                if(pos < (int)sizeof(line) - 1)
                     line[pos++] = c;
-                }
             }
         }
+        if(pos == 0) break;
+        line[pos] = '\0';
 
-        if(pos == 0) break;  // Datei zu Ende
+        // Manuell parsen: open,high,low,close
+        int idx = 0;
+        int vals[4] = {0, 0, 0, 0};
+        int field = 0;
+        while(field < 4 && line[idx] != '\0') {
+            int n = parse_int(&line[idx], &vals[field]);
+            if(n == 0) break;
+            idx += n;
+            field++;
+            if(line[idx] == ',') idx++;
+        }
 
-        // Zeile parsen: open,high,low,close
-        int o = 0, h = 0, l = 0, cl = 0;
-        if(sscanf(line, "%d,%d,%d,%d", &o, &h, &l, &cl) == 4) {
-            candles[candle_count].open  = o;
-            candles[candle_count].high  = h;
-            candles[candle_count].low   = l;
-            candles[candle_count].close = cl;
+        if(field == 4) {
+            candles[candle_count].open  = vals[0];
+            candles[candle_count].high  = vals[1];
+            candles[candle_count].low   = vals[2];
+            candles[candle_count].close = vals[3];
             candle_count++;
         }
     }
