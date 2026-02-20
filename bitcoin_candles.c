@@ -79,7 +79,7 @@ static bool load_candles_from_csv() {
     return candle_count > 0;
 }
 
-#define MAX_OBJS 50
+#define MAX_OBJS 20
 
 typedef enum {
     TOOL_LINE,
@@ -121,7 +121,7 @@ typedef struct {
     int start_cidx;
     bool has_start;
 
-    DrawnObj objs[MAX_OBJS];
+    DrawnObj* objs;  // Heap-Speicher
     int obj_count;
 } AppState;
 
@@ -306,6 +306,7 @@ int32_t bitcoin_candles_app(void* p) {
 
     AppState* state = malloc(sizeof(AppState));
     memset(state, 0, sizeof(AppState));
+    state->objs      = malloc(sizeof(DrawnObj) * MAX_OBJS);
     state->running   = true;
     state->visible   = 10;
     state->cursor_x  = CHART_X + CHART_W / 2;
@@ -450,6 +451,7 @@ int32_t bitcoin_candles_app(void* p) {
     view_port_free(viewport);
     furi_message_queue_free(event_queue);
     furi_record_close(RECORD_GUI);
+    free(state->objs);
     free(state);
     return 0;
 }
