@@ -5,31 +5,22 @@
 #include <string.h>
 #include <stdio.h>
 
-// ============================================================
-//  BETA: Bitcoin Candle Chart für Flipper Zero
-//  Zeigt 4 Candles mit OHLC-Daten auf dem 128x64 Display
-// ============================================================
-
 #define CANDLE_COUNT 4
-#define CHART_X      10   // Linker Rand
-#define CHART_Y      8    // Oberer Rand
-#define CHART_W      108  // Breite des Chart-Bereichs
-#define CHART_H      48   // Höhe des Chart-Bereichs
-#define CANDLE_W     10   // Breite eines Candle-Körpers
-#define CANDLE_GAP   16   // Abstand zwischen Candles (Mitte zu Mitte)
+#define CHART_X      10
+#define CHART_Y      8
+#define CHART_W      108
+#define CHART_H      48
+#define CANDLE_W     10
+#define CANDLE_GAP   16
 
-// OHLC Candle Struktur
 typedef struct {
-    float open;
-    float high;
-    float low;
-    float close;
+    int open;
+    int high;
+    int low;
+    int close;
     const char* label;
 } Candle;
 
-// ============================================================
-//  HIER KANNST DU DIE WERTE SPÄTER ANPASSEN
-// ============================================================
 static Candle candles[CANDLE_COUNT] = {
     { .open = 62000, .high = 65500, .low = 61000, .close = 64800, .label = "T-3" },
     { .open = 64800, .high = 67200, .low = 63500, .close = 63900, .label = "T-2" },
@@ -42,20 +33,21 @@ typedef struct {
     int  selected;
 } AppState;
 
-static int price_to_y(float price, float price_min, float price_max) {
+static int price_to_y(int price, int price_min, int price_max) {
     if(price_max <= price_min) return CHART_Y + CHART_H / 2;
-    float ratio = (price - price_min) / (price_max - price_min);
-    return (int)(CHART_Y + CHART_H - ratio * CHART_H);
+    int ratio_num = (price - price_min) * CHART_H;
+    int ratio_den = (price_max - price_min);
+    return CHART_Y + CHART_H - (ratio_num / ratio_den);
 }
 
-static void get_price_range(float* out_min, float* out_max) {
-    float mn = candles[0].low;
-    float mx = candles[0].high;
+static void get_price_range(int* out_min, int* out_max) {
+    int mn = candles[0].low;
+    int mx = candles[0].high;
     for(int i = 1; i < CANDLE_COUNT; i++) {
         if(candles[i].low  < mn) mn = candles[i].low;
         if(candles[i].high > mx) mx = candles[i].high;
     }
-    float pad = (mx - mn) * 0.05f;
+    int pad = (mx - mn) / 20;
     *out_min = mn - pad;
     *out_max = mx + pad;
 }
@@ -63,7 +55,7 @@ static void get_price_range(float* out_min, float* out_max) {
 static void draw_callback(Canvas* canvas, void* ctx) {
     AppState* state = (AppState*)ctx;
 
-    float price_min, price_max;
+    int price_min, price_max;
     get_price_range(&price_min, &price_max);
 
     canvas_clear(canvas);
@@ -110,7 +102,7 @@ static void draw_callback(Canvas* canvas, void* ctx) {
 
     Candle* sel = &candles[state->selected];
     char info[48];
-    snprintf(info, sizeof(info), "O:%.1fk C:%.1fk", sel->open / 1000.0f, sel->close / 1000.0f);
+    snprintf(info, sizeof(info), "O:%dk C:%dk", sel->open / 1000, sel->close / 1000);
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str(canvas, 0, 63, info);
 }
