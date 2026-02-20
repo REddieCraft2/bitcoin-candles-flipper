@@ -1,14 +1,14 @@
-#include <furi.h>
-#include <gui/gui.h>
-#include <input/input.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
+#include 
+#include 
+#include 
+#include 
+#include 
+#include 
 
-#define CANDLE_COUNT   100
-#define MIN_VISIBLE    3
+#define CANDLE_COUNT100
+#define MIN_VISIBLE3
 #define MAX_VISIBLE    20
-#define CHART_X        2
+#define CHART_X2
 #define CHART_Y        10
 #define CHART_W        124
 #define CHART_H        52
@@ -123,7 +123,7 @@ static Candle candles[CANDLE_COUNT] = {
     { 105500, 109000, 105000, 108500 },
 };
 
-#define MAX_OBJS 50
+#define MAX_OBJS50
 
 typedef enum {
     TOOL_LINE,
@@ -163,6 +163,7 @@ typedef struct {
     int start_price;
     int start_cidx;
     bool has_start;
+    bool ok_long_press_handled;
 
     DrawnObj objs[MAX_OBJS];
     int obj_count;
@@ -194,8 +195,8 @@ static int y_to_price(int py, int price_min, int price_max) {
 static int cidx_to_x(int cidx1000, int offset, int visible) {
     int candle_w = (CHART_W - 4) / visible;
     if(candle_w < 1) candle_w = 1;
-    int rel = cidx1000 - offset * 1000;
-    return CHART_X + 2 + (rel * candle_w) / 1000 + candle_w / 2;
+    int rel = cidx1000 - offset *1000;
+    return CHART_X +2 + (rel * candle_w) / 1000 + candle_w / 2;
 }
 
 static int x_to_cidx(int px, int offset, int visible) {
@@ -217,11 +218,11 @@ static void draw_candles(Canvas* canvas, AppState* state, int price_min, int pri
         Candle* c = &candles[idx];
         bool bullish = (c->close >= c->open);
         int cx = CHART_X + 2 + i * candle_w + candle_w / 2;
-        int y_high  = price_to_y(c->high,  price_min, price_max);
+        int y_high= price_to_y(c->high,  price_min, price_max);
         int y_low   = price_to_y(c->low,   price_min, price_max);
         int y_open  = price_to_y(c->open,  price_min, price_max);
         int y_close = price_to_y(c->close, price_min, price_max);
-        int body_top    = bullish ? y_close : y_open;
+        int body_top= bullish ? y_close : y_open;
         int body_bottom = bullish ? y_open  : y_close;
         int body_h      = body_bottom - body_top;
         if(body_h < 1) body_h = 1;
@@ -249,7 +250,7 @@ static void draw_objects(Canvas* canvas, AppState* state, int price_min, int pri
             int y = price_to_y(o->price1, price_min, price_max);
             canvas_draw_line(canvas, CHART_X, y, CHART_X + CHART_W, y);
         } else if(o->type == OBJ_BOX) {
-            int x_left   = cidx_to_x(o->cidx1, state->offset, state->visible);
+            int x_left= cidx_to_x(o->cidx1, state->offset, state->visible);
             int y_top    = price_to_y(o->price1, price_min, price_max);
             int y_bottom = price_to_y(o->price2, price_min, price_max);
             if(y_top > y_bottom) { int tmp = y_top; y_top = y_bottom; y_bottom = tmp; }
@@ -264,204 +265,4 @@ static void draw_objects(Canvas* canvas, AppState* state, int price_min, int pri
     }
 }
 
-static const char* tool_name(DrawTool t) {
-    if(t == TOOL_LINE)  return "Linie";
-    if(t == TOOL_HLINE) return "Horizontal";
-    return "Box";
-}
-
-static void render(Canvas* canvas, AppState* state) {
-    int price_min, price_max;
-    get_price_range_window(state->offset, state->visible, &price_min, &price_max);
-
-    canvas_clear(canvas);
-    canvas_set_color(canvas, ColorBlack);
-    canvas_set_font(canvas, FontSecondary);
-
-    if(state->mode == STATE_CHART) {
-        canvas_draw_str(canvas, 2, 7, "BTC/USD");
-        if(state->obj_count > 0) canvas_draw_str(canvas, 80, 7, "Back=Undo");
-    } else {
-        char label[32];
-        const char* step = state->has_start ? "Ende" : "Start";
-        if(state->tool == TOOL_HLINE)
-            snprintf(label, sizeof(label), "%s: OK=setzen", tool_name(state->tool));
-        else
-            snprintf(label, sizeof(label), "%s: %s", tool_name(state->tool), step);
-        canvas_draw_str(canvas, 2, 7, label);
-    }
-
-    canvas_draw_frame(canvas, CHART_X, CHART_Y, CHART_W, CHART_H);
-    draw_candles(canvas, state, price_min, price_max);
-    draw_objects(canvas, state, price_min, price_max);
-
-    if(state->mode == STATE_DRAW) {
-        // Vorschau
-        if(state->has_start) {
-            if(state->tool == TOOL_LINE) {
-                int x1 = cidx_to_x(state->start_cidx, state->offset, state->visible);
-                int y1 = price_to_y(state->start_price, price_min, price_max);
-                canvas_draw_line(canvas, x1, y1, state->cursor_x, state->cursor_y);
-            } else if(state->tool == TOOL_BOX) {
-                int x_left   = cidx_to_x(state->start_cidx, state->offset, state->visible);
-                int y_top    = price_to_y(state->start_price, price_min, price_max);
-                int y_bottom = state->cursor_y;
-                if(y_top > y_bottom) { int tmp = y_top; y_top = y_bottom; y_bottom = tmp; }
-                int box_h = y_bottom - y_top;
-                if(box_h < 1) box_h = 1;
-                if(x_left < CHART_X + CHART_W) {
-                    if(x_left < CHART_X) x_left = CHART_X;
-                    int box_w = (CHART_X + CHART_W) - x_left;
-                    canvas_draw_frame(canvas, x_left, y_top, box_w, box_h);
-                }
-            }
-        }
-        // Horizontale Vorschau immer anzeigen
-        if(state->tool == TOOL_HLINE) {
-            canvas_draw_line(canvas, CHART_X, state->cursor_y,
-                                     CHART_X + CHART_W, state->cursor_y);
-        }
-        // Cursor-Kreuz
-        canvas_draw_line(canvas, state->cursor_x - 4, state->cursor_y,
-                                 state->cursor_x + 4, state->cursor_y);
-        canvas_draw_line(canvas, state->cursor_x, state->cursor_y - 4,
-                                 state->cursor_x, state->cursor_y + 4);
-    }
-}
-
-static void draw_callback(Canvas* canvas, void* ctx) {
-    render(canvas, (AppState*)ctx);
-}
-
-static void input_callback(InputEvent* event, void* ctx) {
-    FuriMessageQueue* queue = (FuriMessageQueue*)ctx;
-    furi_message_queue_put(queue, event, FuriWaitForever);
-}
-
-int32_t bitcoin_candles_app(void* p) {
-    UNUSED(p);
-
-    AppState* state = malloc(sizeof(AppState));
-    memset(state, 0, sizeof(AppState));
-    state->mode       = STATE_CHART;
-    state->running    = true;
-    state->offset     = 90;
-    state->visible    = 10;
-    state->cursor_x   = CHART_X + CHART_W / 2;
-    state->cursor_y   = CHART_Y + CHART_H / 2;
-    state->tool       = TOOL_LINE;
-    state->has_start  = false;
-    state->obj_count  = 0;
-
-    FuriMessageQueue* event_queue = furi_message_queue_alloc(8, sizeof(InputEvent));
-    ViewPort* viewport = view_port_alloc();
-    view_port_draw_callback_set(viewport, draw_callback, state);
-    view_port_input_callback_set(viewport, input_callback, event_queue);
-    Gui* gui = furi_record_open(RECORD_GUI);
-    gui_add_view_port(gui, viewport, GuiLayerFullscreen);
-
-    InputEvent event;
-    while(state->running) {
-        if(furi_message_queue_get(event_queue, &event, 100) == FuriStatusOk) {
-
-            // ── CHART-MODUS ──────────────────────────────────────────
-            if(state->mode == STATE_CHART) {
-                if(event.type == InputTypePress || event.type == InputTypeRepeat) {
-                    if(event.key == InputKeyLeft) {
-                        if(state->offset > 0) state->offset--;
-                    } else if(event.key == InputKeyRight) {
-                        if(state->offset + state->visible < CANDLE_COUNT) state->offset++;
-                    } else if(event.key == InputKeyUp) {
-                        if(state->visible > MIN_VISIBLE) state->visible--;
-                    } else if(event.key == InputKeyDown) {
-                        if(state->visible < MAX_VISIBLE &&
-                           state->offset + state->visible < CANDLE_COUNT)
-                            state->visible++;
-                    } else if(event.key == InputKeyOk) {
-                        state->mode      = STATE_DRAW;
-                        state->cursor_x  = CHART_X + CHART_W / 2;
-                        state->cursor_y  = CHART_Y + CHART_H / 2;
-                        state->has_start = false;
-                    } else if(event.key == InputKeyBack) {
-                        if(state->obj_count > 0) state->obj_count--;
-                    }
-                }
-                if(event.type == InputTypeLong && event.key == InputKeyBack) {
-                    state->running = false;
-                }
-
-            // ── DRAW-MODUS ───────────────────────────────────────────
-            } else {
-                // OK lang = Tool wechseln
-                if(event.type == InputTypeLong && event.key == InputKeyOk) {
-                    state->tool = (DrawTool)((state->tool + 1) % 3);
-                    state->has_start = false;
-
-                } else if(event.type == InputTypePress || event.type == InputTypeRepeat) {
-                    if(event.key == InputKeyLeft) {
-                        if(state->cursor_x > CHART_X + 1) state->cursor_x--;
-                    } else if(event.key == InputKeyRight) {
-                        if(state->cursor_x < CHART_X + CHART_W - 1) state->cursor_x++;
-                    } else if(event.key == InputKeyUp) {
-                        if(state->cursor_y > CHART_Y + 1) state->cursor_y--;
-                    } else if(event.key == InputKeyDown) {
-                        if(state->cursor_y < CHART_Y + CHART_H - 1) state->cursor_y++;
-
-                    } else if(event.key == InputKeyOk) {
-                        // OK kurz = Punkt setzen
-                        int price_min, price_max;
-                        get_price_range_window(state->offset, state->visible,
-                                               &price_min, &price_max);
-                        int cur_price = y_to_price(state->cursor_y, price_min, price_max);
-                        int cur_cidx  = x_to_cidx(state->cursor_x, state->offset, state->visible);
-
-                        if(state->tool == TOOL_HLINE) {
-                            if(state->obj_count < MAX_OBJS) {
-                                state->objs[state->obj_count].type   = OBJ_HLINE;
-                                state->objs[state->obj_count].price1 = cur_price;
-                                state->obj_count++;
-                            }
-                        } else if(!state->has_start) {
-                            state->start_price = cur_price;
-                            state->start_cidx  = cur_cidx;
-                            state->has_start   = true;
-                        } else {
-                            if(state->obj_count < MAX_OBJS) {
-                                DrawnObj* o = &state->objs[state->obj_count];
-                                if(state->tool == TOOL_LINE) {
-                                    o->type   = OBJ_LINE;
-                                    o->price1 = state->start_price;
-                                    o->cidx1  = state->start_cidx;
-                                    o->price2 = cur_price;
-                                    o->cidx2  = cur_cidx;
-                                } else { // TOOL_BOX
-                                    o->type   = OBJ_BOX;
-                                    o->price1 = state->start_price;
-                                    o->price2 = cur_price;
-                                    o->cidx1  = state->start_cidx;
-                                }
-                                state->obj_count++;
-                            }
-                            state->has_start = false;
-                        }
-
-                    } else if(event.key == InputKeyBack) {
-                        if(state->has_start) {
-                            state->has_start = false;
-                        } else {
-                            state->mode = STATE_CHART;
-                        }
-                    }
-                }
-            }
-        }
-        view_port_update(viewport);
-    }
-
-    gui_remove_view_port(gui, viewport);
-    view_port_free(viewport);
-    furi_message_queue_free(event_queue);
-    furi_record_close(RECORD_GUI);
-    free(state);
-    return 0;
-}
+static const char* tool_name(DrawTool t) {​​​​​​​​​​​​​​​​
