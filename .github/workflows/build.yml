@@ -10,10 +10,10 @@ jobs:
 
     steps:
       - name: Checkout this repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Checkout Flipper Firmware
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: flipperdevices/flipperzero-firmware
           submodules: recursive
@@ -31,7 +31,7 @@ jobs:
           ./fbt fap_bitcoin_candles
 
       - name: Upload FAP as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bitcoin_candles_fap
           path: firmware/build/f7-firmware-D/.extapps/bitcoin_candles.fap
