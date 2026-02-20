@@ -1,0 +1,12 @@
+App(
+    appid="bitcoin_candles",
+    name="Bitcoin Candles",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="bitcoin_candles_app",
+    requires=["gui"],
+    stack_size=1 * 1024,
+    fap_category="Misc",
+    fap_version=(1, 0),
+    fap_description="Bitcoin OHLC Candle Chart - Beta",
+    fap_author="Du",
+)
